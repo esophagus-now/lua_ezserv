@@ -708,6 +708,10 @@ int luaopen_ezserv(lua_State *L) {
     mkcode(service_unavailable);
     lua_rawset(L,-3);
 
+    //Save this table into a global
+    lua_pushvalue(L,-1);
+    lua_setglobal(L, "ezserv");
+
     //Done setting up library table, but we want to add
     //a few things to the registry before returning
     

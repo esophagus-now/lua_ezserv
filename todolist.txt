@@ -47,3 +47,5 @@ This API is designed around running servers, because that's
 all I need for the actual project I'm trying to develop. 
 Nonetheless, it would be nice if you could write client code
 too.
+
+Should the io_context be managed separately from the server?
