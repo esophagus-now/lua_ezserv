@@ -6,7 +6,7 @@
 		pkgs.gnumake
         pkgs.boost
         pkgs.netcat-gnu
-        pkgs.lua5_4
+        pkgs.lua5_1
         pkgs.rlwrap
         pkgs.vim
         pkgs.valgrind

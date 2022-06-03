@@ -1,7 +1,7 @@
 package = "ezserv"
 version = "1.0-1"
 source = {
-   url = "https://github.com/esophagus-now/lua_ezserv/archive/refs/tags/ezserv-1.0.tar.gz",
+   url = "https://github.com/esophagus-now/lua_ezserv/archive/refs/tags/ezserv-1.1.tar.gz",
    dir = "lua_ezserv-ezserv-1.0" -- No idea why github did this but whatever
 }
 description = {
@@ -30,7 +30,7 @@ description = {
    license = "MIT" -- I hope this is a good choice
 }
 dependencies = {
-   "lua >= 5.2"
+   "lua >= 5.1"
 }
 external_dependencies = {
    LIBBOOST = {

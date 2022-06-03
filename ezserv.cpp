@@ -20,6 +20,20 @@ namespace http = boost::beast::http;
 namespace websocket = boost::beast::websocket;
 using errcode = boost::system::error_code;
 
+//Some compatibility stuff so we can use this
+//in lua 5.1 (and earlier?)
+
+#ifndef LUA_VERSION_NUM
+#define LUA_VERSION_NUM 0
+#endif
+#if LUA_VERSION_NUM < 502
+void luaL_setmetatable (lua_State *L, const char *tname) {
+    lua_pushstring(L, tname);
+    lua_gettable(L, LUA_REGISTRYINDEX);
+    lua_setmetatable(L,-2);
+}
+#endif
+
 extern "C"
 int luaopen_ezserv(lua_State*);
 
