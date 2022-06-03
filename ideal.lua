@@ -40,7 +40,8 @@ filemap = {
 
 print("------------BEGIN------------")
 
-while true do
+quit = false
+while not quit do
     -- ev has the event data, which can be different depending
     -- on what happened. src is the client that generated the
     -- event. 
@@ -60,17 +61,20 @@ while true do
     print("ev.type = ", ev.type)
     status,msg = pcall( function()
         if (ev.type == "connect") then
+            print("is upgrade: ", tostring(ev.is_upgrade))
             if (ev.is_upgrade) then
                 ws_sessions[src] = true
+            else
+                s:accept()
             end
             src:recv()
-            s:accept()
         elseif (ev.type == "request") then
             print("Request:", ev.method, ev.target)
             print("Request body = [" .. ev.data .. "]")
+            print("Is upgrade: ", tostring(ev.is_upgrade));
             if (ev.is_upgrade) then
-                print("upgrade requested, but this is not implemnted yet")
-                src:send(ez.http.not_implemted)
+                print("upgrade requested")
+                src:upgrade()
             else
                 local filename = filemap[ev.target]
                 --print("Using filename", tostring(filename))
@@ -82,23 +86,32 @@ while true do
                     -- A new event on src will only be generated if
                     -- the write fails
                     f = f:gsub("world", "from lua")
-                    src:send(f)
+                    src:send(f, true)
                 else
                     src:send(ez.http.not_found)
                 end
                 src:recv()
             end
         elseif (ev.type == "data") then
-            -- Broadcast to all clients
-            for _,ws in pairs(ws_sessions) do
-                ws:send(ev.data)
+            print("Received websocket data")
+            print("data = [" .. ev.data .. "]")
+    
+            if (ev.data == "super secret string") then
+                --FIXME: need better way to shut down server
+                print("Quitting server")
+                quit = true
             end
-    
-            --if (ev.data = "super secret string") then
-            --    s:close()
-            --end
-    
+            
+            -- Broadcast to all clients
+            for ws,_ in pairs(ws_sessions) do
+                print("broadcasting...")
+                ws:send(ev.data, true)
+            end
+
+            print("starting async ws_recv...")
             src:recv()
+        elseif (ev.type == "ack") then
+            print("Received an ack on ", src)
         elseif (ev.type == "close") then
             ws_sessions[src] = nil -- Don't even need to care whether 
                                    -- it was there already. P.S. allows
@@ -116,20 +129,3 @@ while true do
     -- Other idea: keep a table mapping socket/websocket handles
     -- to resumable coroutines
 end
-
-
---[[
-Ideas for dealing with websockets upgrading
-- Have a function called ez.is_websocket_upgrade, and have an
-  ez.ws_accept(ezhttp) (or maybe put a flag in the request
-  event)
-- Give a different type to upgrade requests
-- Have the CPP check every request itself and upgrade it before
-  issuing a connect event
-
-Although the first option is a little messier for the Lua code,
-ultimately it gives the most flexibility. For example, the Lua
-code may not wish to allow the upgrade, or in the future when I
-add subprotocol support this would allow the Lua code to see it
-easily. So we'll do that.
-]]

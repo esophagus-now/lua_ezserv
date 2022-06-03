@@ -6,7 +6,8 @@
 [N] Dealing with shared pointer lifetimes
 [x] Get just plain file serving over HTTP working
 [x] Get 404 messages working
-[ ] Get the chatroom working again
+[x] Get the chatroom working again
+[/] Get it all valgrind clean
 [ ] Figure out that boost beast websocket teardown stuff
 [ ] Try to package as a luarock?
 

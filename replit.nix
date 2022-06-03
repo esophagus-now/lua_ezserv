@@ -10,5 +10,6 @@
         pkgs.rlwrap
         pkgs.vim
         pkgs.valgrind
+        pkgs.less
 	];
 }

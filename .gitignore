@@ -2,3 +2,6 @@
 **.so
 **.o
 core*
+vgcore*
+vgrind.txt
+log.txt

@@ -26,21 +26,25 @@ int luaopen_ezserv(lua_State*);
 template <typename CRTP>
 struct refcounted {
     int *refcount;
-
+    #define DBG_REFCOUNT() \
+        cout << "The refcount of " << typeid(CRTP).name() << "@" << this << " is now " << *refcount << endl
+    //#define DBG_REFCOUNT (void)0
     refcounted() : refcount(new int) {
-        //cout << "Constructing a " << typeid(CRTP).name() << endl;
         *refcount = 1;
+        DBG_REFCOUNT();
     }
 
     CRTP* ref() {
         //cout << "ref()ing a " << typeid(CRTP).name() << endl;
         *refcount += 1;
+        DBG_REFCOUNT();
         return static_cast<CRTP*>(this);
     }
 
     void put() {
         //cout << "put()ing a " << typeid(CRTP).name() << endl;
         *refcount -= 1;
+        DBG_REFCOUNT();
         if (*refcount == 0) {
             //cout << "destroying a " << typeid(CRTP).name() << endl;
             delete refcount;
@@ -224,6 +228,10 @@ void ws_accept_handler(
     lua_pushstring(L, "type");
     lua_pushstring(L, "connect");
     lua_rawset(L, -3);
+
+    lua_pushstring(L, "is_upgrade");
+    lua_pushboolean(L, true);
+    lua_rawset(L,-3);
     
     lua_pushstring(L, "http_obj");
     luaL_pushptr(L, h, "ezhttp");
@@ -277,7 +285,7 @@ void http_send_handler(
     s->put();
 }
 
-void websock_send_handler(
+void ws_send_handler(
     lua_State *L, ezwebsock *s,
     char *data, bool en_ack,
     errcode const& ec, size_t bytes
@@ -321,7 +329,10 @@ void http_recv_handler(
     //cout << "In http recv handler" << endl;
     if (ec) {
         luaL_pusherrorcode(L, ec);
-        lua_pushnil(L);
+        luaL_pushptr(L, s, "ezhttp");
+        //Subtle: pushptr will call ref() if needed. We
+        //still need to call put() to release the references
+        //held by this handler call
         s->put();
         return;
     }
@@ -350,6 +361,49 @@ void http_recv_handler(
     lua_rawset(L,-3);
 
     luaL_pushptr(L, s, "ezhttp");
+
+    //Subtle: pushptr will call ref() if needed. We
+    //still need to call put() to release the references
+    //held by this handler call
+    s->put();
+}
+
+void ws_recv_handler(
+    lua_State *L, ezwebsock*s,
+    errcode const& ec, size_t bytes
+) {
+    //cout << "In http recv handler" << endl;
+    if (ec) {
+        luaL_pusherrorcode(L, ec);
+        luaL_pushptr(L, s, "ezhttp");
+        //Subtle: pushptr will call ref() if needed. We
+        //still need to call put() to release the references
+        //held by this handler call
+        s->put();
+        return;
+    }
+
+    lua_newtable(L);
+    lua_pushstring(L, "type");
+    lua_pushstring(L, "data");
+    lua_rawset(L,-3);
+
+    lua_pushstring(L, "data");
+    //Trick: because we are using flat_buffer, we
+    //can just get its data pointer and it's 
+    //guaranteed to be contiguous
+    //Lua makes a copy here. Would be nice if there was
+    //some kind of move semantics but that's OK.
+    lua_pushlstring(
+        L, 
+        //C++ is so persnickety...
+        reinterpret_cast<char const*>(s->buf.data().data()), 
+        s->buf.size()
+    );
+    s->buf.consume(s->buf.size());
+    lua_rawset(L,-3);
+
+    luaL_pushptr(L, s, "ezwebsock");
 
     //Subtle: pushptr will call ref() if needed. We
     //still need to call put() to release the references
@@ -532,10 +586,10 @@ int ezhttp_upgrade(lua_State *L) {
     ezhttp *h = luaL_checkptr<ezhttp>(L, 1, "ezhttp");
 
     if (!websocket::is_upgrade(h->req)) {
-        luaL_error("Cannot upgrade an ezhttp unless it has first received an upgrade request");
+        luaL_error(L, "Cannot upgrade an ezhttp unless it has first received an upgrade request");
     }
 
-    ezwebsock *s = new ezwebsock(h->sock);
+    ezwebsock *s = new ezwebsock(move(h->sock));
 
     auto handler = bind(
         ws_accept_handler,
@@ -555,6 +609,8 @@ int ezhttp_upgrade(lua_State *L) {
     //constructed (remember that the constructor initializes 
     //the refcount to 1).
     s->put();
+
+    return 0;
 }
 
 int ezhttp_dbg_refcount(lua_State *L) {
@@ -570,8 +626,12 @@ int ezhttp_gc(lua_State *L) {
     return 0;
 }
 
+//Optional third argument to enable an "acknowledge" event
 int ezwebsock_send(lua_State *L) {
     ezwebsock *s = luaL_checkptr<ezwebsock>(L, 1, "ezwebsock");
+    
+    bool en_ack = lua_toboolean(L,3);
+    
     switch (lua_type(L,2)) {
     //For sending raw data
     case LUA_TSTRING: {
@@ -580,8 +640,21 @@ int ezwebsock_send(lua_State *L) {
         //cout << "Sending: [" << endl;
         //cout << str << "]" << endl;
         //cout << "(of length " << len << endl;
-        data = new char[len];
+        char *data = new char[len];
         memcpy(data, str, len);
+
+        //Handler will free the data once we are done
+        //with it
+        auto handler = bind(
+            ws_send_handler,
+            L, s->ref(), data, en_ack,
+            _1, _2
+        );
+
+        s->sock.async_write(
+            boost::asio::buffer(data, len),
+            handler
+        );
         
         break;
     }
@@ -590,7 +663,25 @@ int ezwebsock_send(lua_State *L) {
     default:
         luaL_error(L, "This type is not supported for sending data on a websocket");
     }
+
+    return 0;
+}
+
+int ezwebsock_recv(lua_State *L) {
+    ezwebsock *s = luaL_checkptr<ezwebsock>(L, 1, "ezwebsock");
     
+    //cout << "In ezwebsock_recv" << endl;
+    
+    auto handler = bind(
+        ws_recv_handler,
+        L, s->ref(),
+        _1,_2
+    );
+
+    //cout << "Calling websocket async_read" << endl;
+    s->sock.async_read(s->buf, handler);
+
+    return 0;
 }
 
 int ezwebsock_gc(lua_State *L) {
@@ -668,11 +759,11 @@ int luaopen_ezserv(lua_State *L) {
     lua_rawset(L, -3); //Set __index to point at ezwebsock table
 
     lua_pushstring(L, "send");
-    lua_pushcfunction(L, &unimplemented);
+    lua_pushcfunction(L, &ezwebsock_send);
     lua_rawset(L, -3); //Set ezwebsock.send
 
     lua_pushstring(L, "recv");
-    lua_pushcfunction(L, &unimplemented);
+    lua_pushcfunction(L, &ezwebsock_recv);
     lua_rawset(L, -3); //Set ezwebsock.recv
 
     lua_pushstring(L, "__gc");

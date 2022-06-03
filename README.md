@@ -68,13 +68,24 @@ The member functions of an `ezhttp` are:
 - `recv()`: Begin an asynchronous read. At some point in
   the future, calling `server:next_event()` will return
   the result of this read.
-- `send(str|error_code)`: Passing a Lua string to this
-  function will send an ordinary HTTP response with `str`
+- `send(str|error_code, [en_ack])`: Passing a Lua string to
+  this function will send an ordinary HTTP response with `str`
   as its body. Passing a member of `ezserv.http` will send
-  an HTTP error code.
+  an HTTP error code. Giving a truthy second argument will
+  cause an acknowledge event to be issued for successful
+  sends (otherwise, you only get events for errors).
+- `upgrade()` start an asynchronous websocket handshake.
+  This is only valid after having just received an upgrade
+  request.
 
 ### The `ezwebsock` type
 TODO
+
+## Requirements
+
+You must have Boost and Lua installed on your machine. 
+I wrote this with Boost 1.69 and Lua 5.4 but it may work
+in other versions. TODO: figure this out.
 
 ## Quickstart
 

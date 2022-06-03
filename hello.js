@@ -26,7 +26,7 @@ function i_am_loaded() {
         }
     };
 
-    ws = new WebSocket("wss://boostbeast.mahkoe.repl.co/mahjong.cgi");
+    ws = new WebSocket("wss://lua-EZ-server.mahkoe.repl.co/chat.cgi");
     ws.onmessage = function(e) {
         console.log(e);
         appendmsg(e.data);
