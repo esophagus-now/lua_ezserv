@@ -42,7 +42,7 @@ build = {
    modules = {
         ezserv = {
             sources = {"ezserv.cpp"},
-            libraries = {"pthread"}, --Even though we are single-threaded, boost insists on this
+            libraries = {"stdc++", "pthread"}, --Even though we are single-threaded, boost insists on this
             incdirs = {"$(LIBBOOST_INCDIR)"}
         }
    }
