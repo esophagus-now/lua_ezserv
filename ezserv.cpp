@@ -27,7 +27,7 @@ template <typename CRTP>
 struct refcounted {
     int *refcount;
     //#define DBG_REFCOUNT() cout << "The refcount of " << typeid(CRTP).name() << "@" << this << " is now " << *refcount << endl
-    #define DBG_REFCOUNT (void)0
+    #define DBG_REFCOUNT() (void)0
     refcounted() : refcount(new int) {
         *refcount = 1;
         DBG_REFCOUNT();
