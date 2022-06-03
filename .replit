@@ -6,6 +6,9 @@ hidden = ["main", "**/*.o", "**/*.d", ".ccls-cache", ".*"]
 [languages.cpp]
 pattern = "**/*.{cpp,h}"
 
+[languages.lua]
+pattern = "**/*.{lua,rockspec}"
+
 [languages.cpp.languageServer]
 start = "ccls"
 

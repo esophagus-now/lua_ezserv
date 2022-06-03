@@ -11,5 +11,6 @@
         pkgs.vim
         pkgs.valgrind
         pkgs.less
+        pkgs.luarocks
 	];
 }

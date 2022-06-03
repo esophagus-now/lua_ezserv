@@ -75,8 +75,7 @@ The member functions of an `ezhttp` are:
   cause an acknowledge event to be issued for successful
   sends (otherwise, you only get events for errors).
 - `upgrade()` start an asynchronous websocket handshake.
-  This is only valid after having just received an upgrade
-  request.
+  This is only valid after having just received an upgrade request.
 
 ### The `ezwebsock` type
 TODO

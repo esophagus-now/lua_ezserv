@@ -5,3 +5,5 @@ core*
 vgcore*
 vgrind.txt
 log.txt
+JUNK/
+**.gz
