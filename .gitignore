@@ -1,0 +1,4 @@
+.ccls-cache/
+**.so
+**.o
+core*

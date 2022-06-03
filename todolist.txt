@@ -1,0 +1,49 @@
+[x] Make lodable library with just a hello world function
+[x] Add server, http socket, and websocket metatables with
+    placeholder functions
+[x] Rig up start_server function to boost beast
+[x] async_accept and sending connect event
+[N] Dealing with shared pointer lifetimes
+[x] Get just plain file serving over HTTP working
+[x] Get 404 messages working
+[ ] Get the chatroom working again
+[ ] Figure out that boost beast websocket teardown stuff
+[ ] Try to package as a luarock?
+
+
+Other improvement ideas:
+
+So it turns out that all that effort I spent getting rid
+of the shared_ptrs (and replacing with my less good refcounted
+thing) was for nothing. Originally I did it so that the Lua
+code could use my returned lightuserdata as table keys...
+but it turns out that Lua doesn't call the __gc metamethod on
+light user data. Just for kicks I changed it all to use full
+userdata, where the full userdata's buffer was just the size
+needed to store my raw pointers to my refcounted types. But
+the hash lookup uses the pointer to the userdata buffer, not a
+hash of the buffer contents themselves. All of this to say that
+I should probably move everything back to using shared_ptrs.
+
+It would be nice if ezserv:next_event didn't block execution
+indefinitely if it turns out we will never get any more events
+ever. Maybe I should add a timeout argument or something.
+
+We really need a way to gracefully shut down the server when
+ctrl-C is hit...
+
+Although async functions are ultimately what you want in a
+real project, it would be nice to have blocking versions for
+begginers to play around with, and it would be even nicer to
+get "blocking" versions that just yield from your current
+coroutine (of course, we can already do this coroutine trick
+with the library as-is, but it might be nicer if it was
+built-in. Actually, it would be even nicer if you could use
+this with cqueues or a true multithreading library. But don't
+get me started on threads and the complexity of understanding
+threads in boost beast...)
+
+This API is designed around running servers, because that's
+all I need for the actual project I'm trying to develop. 
+Nonetheless, it would be nice if you could write client code
+too.
