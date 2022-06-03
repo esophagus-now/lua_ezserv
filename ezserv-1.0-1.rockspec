@@ -2,7 +2,7 @@ package = "ezserv"
 version = "1.0-1"
 source = {
    url = "https://github.com/esophagus-now/lua_ezserv/archive/refs/tags/ezserv-1.1.tar.gz",
-   dir = "lua_ezserv-ezserv-1.0" -- No idea why github did this but whatever
+   dir = "lua_ezserv-ezserv-1.1" -- No idea why github did this but whatever
 }
 description = {
    summary = "Friendly way to add HTTP/websocket servers to Lua",
