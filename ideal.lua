@@ -28,7 +28,12 @@ ephemeron = {
     __mode = "k"
 }
 ws_sessions = {}
-setmetatable(ws_sessions, ephemeron)
+--I see my mistake now... the value in ws_sessions will
+--disappear when there are no more lua references. My
+--original intention was that the value should disappear
+--only when the dtor is called in C++, but there is no
+--real way to do that
+--setmetatable(ws_sessions, ephemeron)
 
 filemap = {
     ["/"] = "index.html",
@@ -118,6 +123,7 @@ while not quit do
                                    -- userdata to be gc'ed
         elseif (ev.type == "error") then
             print("ezserv reported an error:", ev.message)
+            ws_sessions[src] = nil
         end
         print("--------------------------------")
     end)

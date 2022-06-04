@@ -4,6 +4,6 @@
 core*
 vgcore*
 vgrind.txt
-log.txt
+log*.txt
 JUNK/
 **.gz

@@ -40,24 +40,24 @@ int luaopen_ezserv(lua_State*);
 template <typename CRTP>
 struct refcounted {
     int *refcount;
-    //#define DBG_REFCOUNT() cout << "The refcount of " << typeid(CRTP).name() << "@" << this << " is now " << *refcount << endl
-    #define DBG_REFCOUNT() (void)0
+    //#define DBG_REFCOUNT(pos) cout << "The refcount of " << typeid(CRTP).name() << "@" << this << " is now " << *refcount << "(" << pos << ")" << endl
+    #define DBG_REFCOUNT(pos) (void)0
     refcounted() : refcount(new int) {
         *refcount = 1;
-        DBG_REFCOUNT();
+        DBG_REFCOUNT("ctor");
     }
 
     CRTP* ref() {
         //cout << "ref()ing a " << typeid(CRTP).name() << endl;
         *refcount += 1;
-        DBG_REFCOUNT();
+        DBG_REFCOUNT("ref");
         return static_cast<CRTP*>(this);
     }
 
     void put() {
         //cout << "put()ing a " << typeid(CRTP).name() << endl;
         *refcount -= 1;
-        DBG_REFCOUNT();
+        DBG_REFCOUNT("put");
         if (*refcount == 0) {
             //cout << "destroying a " << typeid(CRTP).name() << endl;
             delete refcount;
@@ -134,6 +134,8 @@ void luaL_pushptr(lua_State *L, T *ptr, char const *tp) {
     lua_pushlightuserdata(L, ptr);
     lua_rawget(L,-2);
 
+    //cout << "Pushing pointer " << ptr << endl;
+    
     if (lua_type(L,-1) == LUA_TUSERDATA) {
         //This userdata already exists. This is an empty
         //if body, but I left it so I could write this
@@ -141,10 +143,11 @@ void luaL_pushptr(lua_State *L, T *ptr, char const *tp) {
 
         //At this point, the stack contains the udata
         //lookup table, and the userdata
+        //cout << "Copying an existing userdata" << endl;
     } else {
         assert(lua_type(L,-1) == LUA_TNIL);
         lua_pop(L,1);
-
+        //cout << "Making a new userdata" << endl;
         //Top of stack still contains udata lookup table
         
         //Create a new userdata and save it in our
@@ -169,9 +172,12 @@ void luaL_pushptr(lua_State *L, T *ptr, char const *tp) {
 
 template <typename T>
 inline T* luaL_checkptr(lua_State *L, int index, char const *tp) {
-    return *reinterpret_cast<T**>(
+    T** raw = reinterpret_cast<T**>(
         luaL_checkudata(L, index, tp)
     );
+    T* ret = *raw;
+    //cout << "raw " << raw << " maps to " << ret << endl;
+    return ret;
 }
 
 //Rule: anything that the callback pushes to the stack
@@ -632,6 +638,16 @@ int ezhttp_dbg_refcount(lua_State *L) {
     return 0;
 }
 
+int ezhttp_tostring(lua_State *L) {
+    ezhttp *s = luaL_checkptr<ezhttp>(L, 1, "ezhttp");
+    char line[80];
+    //%n doesn't work in mingw :(
+    sprintf(line, "ezhttp: %p", s);
+
+    lua_pushstring(L, line);
+    return 1;
+}
+
 int ezhttp_gc(lua_State *L) {
     ezhttp *s = luaL_checkptr<ezhttp>(L, 1, "ezhttp");
     //cout << "I am here" << endl;
@@ -697,8 +713,19 @@ int ezwebsock_recv(lua_State *L) {
     return 0;
 }
 
+int ezwebsock_tostring(lua_State *L) {
+    ezwebsock *s = luaL_checkptr<ezwebsock>(L, 1, "ezwebsock");
+    char line[80];
+    //%n doesn't work in mingw :(
+    sprintf(line, "ezwebsock: %p", s);
+
+    lua_pushstring(L, line);
+    return 1;
+}
+
 int ezwebsock_gc(lua_State *L) {
     ezwebsock *s = luaL_checkptr<ezwebsock>(L, 1, "ezwebsock");
+    //cout << "Collecting ezwebsock@" << s << endl;
     s->put();
     return 0;
 }
@@ -756,6 +783,10 @@ int luaopen_ezserv(lua_State *L) {
     lua_pushcfunction(L, ezhttp_upgrade);
     lua_rawset(L, -3); //Set ezhttp.upgrade
 
+    lua_pushstring(L, "__tostring");
+    lua_pushcfunction(L, &ezhttp_tostring);
+    lua_rawset(L, -3); //Set ezhttp.__tostring
+
     lua_pushstring(L, "__gc");
     lua_pushcfunction(L, &ezhttp_gc);
     lua_rawset(L, -3); //Set ezhttp.__gc
@@ -779,6 +810,10 @@ int luaopen_ezserv(lua_State *L) {
     lua_pushcfunction(L, &ezwebsock_recv);
     lua_rawset(L, -3); //Set ezwebsock.recv
 
+    lua_pushstring(L, "__tostring");
+    lua_pushcfunction(L, &ezwebsock_tostring);
+    lua_rawset(L, -3); //Set ezwebsock.__tostring
+    
     lua_pushstring(L, "__gc");
     lua_pushcfunction(L, &ezwebsock_gc);
     lua_rawset(L, -3); //Set ezwebsock.__gc
@@ -832,6 +867,8 @@ int luaopen_ezserv(lua_State *L) {
         lua_pushstring(L,"kv");
         lua_rawset(L,-3);
     lua_setmetatable(L,-2);
+    //lua_pushvalue(L,-1);
+    //lua_setglobal(L,"ulut");
     lua_settable(L,LUA_REGISTRYINDEX);
     
     return 1;
