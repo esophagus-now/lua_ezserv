@@ -71,6 +71,7 @@ struct ezserver : refcounted<ezserver> {
     boost::asio::io_context ctx;
     tcp::acceptor acc;
     int port;
+    lua_State *who_called_next_event;
 
     //Have I ever mentioned that I don't like constructors?
     ezserver() : ctx(), acc(ctx, tcp::v4()) {}
@@ -81,6 +82,8 @@ struct ezserver : refcounted<ezserver> {
 };
 
 struct ezhttp : refcounted<ezhttp> {
+    ezserver *parent;
+
     tcp::socket sock;
     flat_buffer req_buf;
     http::request<http::string_body> req;
@@ -88,7 +91,8 @@ struct ezhttp : refcounted<ezhttp> {
     http::response<http::buffer_body> rsp;
     bool rsp_vld;
 
-    ezhttp(tcp::socket sock) : 
+    ezhttp(ezserver *parent, tcp::socket sock) : 
+      parent(parent),
       sock(move(sock)),
       rsp_vld(false)
     {}
@@ -102,17 +106,19 @@ struct ezwebsock;
 void ws_send_handler(ezwebsock *, errcode const&, size_t);
 
 struct ezwebsock : refcounted<ezwebsock> {
+    ezserver *parent;
+
     websocket::stream<tcp::socket> sock;
     flat_buffer buf;
     struct pending_send {
-        lua_State *L;
         char *data;
         int len;
         bool en_ack;
     };
     deque<pending_send> pending_sends;
 
-    ezwebsock(tcp::socket sock) :
+    ezwebsock(ezserver *parent, tcp::socket sock) :
+        parent(parent),
         sock(move(sock))
     {}
 
@@ -124,8 +130,8 @@ struct ezwebsock : refcounted<ezwebsock> {
         sock.async_write(boost::asio::buffer(f.data,f.len), handler);
     }
 
-    void queue_send(lua_State *L, char *data, int len, bool en_ack) {
-        pending_sends.push_back({L, data, len, en_ack});
+    void queue_send(char *data, int len, bool en_ack) {
+        pending_sends.push_back({data, len, en_ack});
         if (pending_sends.size() == 1) {
             //If size is 1 it means send queue was previously empty,
             //so we should kick off a write
@@ -218,10 +224,11 @@ inline T* luaL_checkptr(lua_State *L, int index, char const *tp) {
 //call s->put() at the right time. Remember that we aren't 
 //using shared_ptr anyomre :-( 
 void accept_handler(
-    lua_State *L, ezserver *s, 
+    ezserver *s, 
     errcode const& ec, tcp::socket sock
 ) {
     //cout << "In accept handler" << endl;
+    lua_State *L = s->who_called_next_event;
     
     if (ec) {
         luaL_pusherrorcode(L, ec);
@@ -235,7 +242,7 @@ void accept_handler(
     lua_pushstring(L, "connect");
     lua_rawset(L, -3);
 
-    ezhttp *ret = new ezhttp(move(sock));
+    ezhttp *ret = new ezhttp(s, move(sock));
 
     luaL_pushptr(L, ret, "ezhttp");
     //Subtle: pushptr will call ref() if needed. We
@@ -251,10 +258,10 @@ void accept_handler(
 }
 
 void ws_accept_handler(
-    lua_State *L,
     ezhttp *h, ezwebsock *s,
     errcode const& ec
 ) {
+    lua_State *L = s->parent->who_called_next_event;
     if (ec) {
         luaL_pusherrorcode(L, ec);
         lua_pushstring(L, "http_obj");
@@ -295,10 +302,11 @@ void ws_accept_handler(
 }
 
 void http_send_handler(
-    lua_State *L, ezhttp *s,
+    ezhttp *s,
     char *data, bool en_ack,
     errcode const& ec, size_t bytes
 ) {
+    lua_State *L = s->parent->who_called_next_event;
     //cout << "In HTTP send handler" << endl;
     if (ec) {
         luaL_pusherrorcode(L, ec);
@@ -336,9 +344,10 @@ void ws_send_handler(
     ezwebsock *s,
     errcode const& ec, size_t bytes
 ) {
+    lua_State *L = s->parent->who_called_next_event;
+    
     assert(s->pending_sends.size() > 0);
     auto const& f = s->pending_sends.front();
-    lua_State *L = f.L;
     
     //TODO: do I need to check if this actually sent
     //all the bytes? Who knows...
@@ -375,9 +384,11 @@ void ws_send_handler(
 }
 
 void http_recv_handler(
-    lua_State *L, ezhttp *s,
+    ezhttp *s,
     errcode const& ec, size_t bytes
 ) {
+    lua_State *L = s->parent->who_called_next_event;
+    
     //cout << "In http recv handler" << endl;
     if (ec) {
         luaL_pusherrorcode(L, ec);
@@ -421,10 +432,12 @@ void http_recv_handler(
 }
 
 void ws_recv_handler(
-    lua_State *L, ezwebsock*s,
+    ezwebsock*s,
     errcode const& ec, size_t bytes
 ) {
-    //cout << "In http recv handler" << endl;
+    lua_State *L = s->parent->who_called_next_event;
+    
+    cout << "In ws recv handler" << endl;
     if (ec) {
         luaL_pusherrorcode(L, ec);
         luaL_pushptr(L, s, "ezhttp");
@@ -435,6 +448,8 @@ void ws_recv_handler(
         return;
     }
 
+    cout << "Pushing new event table etc" << endl;
+    cout << "Old gettop = " << lua_gettop(L) << endl;
     lua_newtable(L);
     lua_pushstring(L, "type");
     lua_pushstring(L, "data");
@@ -457,6 +472,7 @@ void ws_recv_handler(
 
     luaL_pushptr(L, s, "ezwebsock");
 
+    cout << "New gettop: " << lua_gettop(L) << endl;
     //Subtle: pushptr will call ref() if needed. We
     //still need to call put() to release the references
     //held by this handler call
@@ -470,7 +486,7 @@ int ezserver_accept(lua_State *L) {
     
     auto handler = bind(
         accept_handler,
-        L, s->ref(), /*extend s's lifetime until the accept handler put()s it*/
+        s->ref(), /*extend s's lifetime until the accept handler put()s it*/
         _1, _2
     );
 
@@ -482,7 +498,8 @@ int ezserver_accept(lua_State *L) {
 int ezserver_next_event(lua_State *L) {
     //cout << "In next_event" << endl;
     ezserver *s = luaL_checkptr<ezserver> (L, 1, "ezserver");
-
+    s->who_called_next_event = L;
+    
     //All handlers may push up to two things to the stack
     lua_checkstack(L, 2);
 
@@ -615,7 +632,7 @@ int ezhttp_send(lua_State *L) {
     
     auto handler = bind(
         http_send_handler,
-        L, s->ref(), data, en_ack,
+        s->ref(), data, en_ack,
         _1, _2
     );
     
@@ -632,7 +649,7 @@ int ezhttp_recv(lua_State *L) {
     
     auto handler = bind(
         http_recv_handler,
-        L, s->ref(),
+        s->ref(),
         _1,_2
     );
 
@@ -649,11 +666,11 @@ int ezhttp_upgrade(lua_State *L) {
         luaL_error(L, "Cannot upgrade an ezhttp unless it has first received an upgrade request");
     }
 
-    ezwebsock *s = new ezwebsock(move(h->sock));
+    ezwebsock *s = new ezwebsock(h->parent, move(h->sock));
 
     auto handler = bind(
         ws_accept_handler,
-        L, h->ref(), s->ref(),
+        h->ref(), s->ref(),
         _1
     );
 
@@ -716,7 +733,7 @@ int ezwebsock_send(lua_State *L) {
         //Handler will free the data once we are done
         //with it. By the way, queue_send will take care
         //of ref()ing s if necessary
-        s->queue_send(L, data, len, en_ack);
+        s->queue_send(data, len, en_ack);
         
         break;
     }
@@ -736,7 +753,7 @@ int ezwebsock_recv(lua_State *L) {
     
     auto handler = bind(
         ws_recv_handler,
-        L, s->ref(),
+        s->ref(),
         _1,_2
     );
 
