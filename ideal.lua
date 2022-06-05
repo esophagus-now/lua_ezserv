@@ -4,6 +4,7 @@
 ez = require "ezserv"
 
 s = assert(ez.start_server(80))
+print("queuing the first accept")
 s:accept()
 
 -- This should fail gracefully
@@ -45,6 +46,7 @@ filemap = {
 
 print("------------BEGIN------------")
 
+accepts_left = 3
 quit = false
 while not quit do
     -- ev has the event data, which can be different depending
@@ -63,6 +65,10 @@ while not quit do
     -- the index in a table, or to say "did this message come from
     -- this handle I saved earlier"
     ev,src = s:next_event()
+    if (ev == nil) then
+        print("No event: ", src)
+        break
+    end
     print("ev.type = ", ev.type)
     status,msg = pcall( function()
         if (ev.type == "connect") then
@@ -70,7 +76,10 @@ while not quit do
             if (ev.is_upgrade) then
                 ws_sessions[src] = true
             else
-                s:accept()
+                if (accepts_left > 0) then
+                    s:accept()
+                    accepts_left = accepts_left - 1
+                end
             end
             src:recv()
         elseif (ev.type == "request") then
@@ -110,6 +119,7 @@ while not quit do
             -- Broadcast to all clients
             for ws,_ in pairs(ws_sessions) do
                 print("broadcasting...")
+                ws:send(ev.data, true)
                 ws:send(ev.data, true)
             end
 

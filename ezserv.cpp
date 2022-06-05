@@ -11,6 +11,7 @@
 #include <typeinfo>
 #include <cstring> //memcpy
 #include <unordered_map>
+#include <deque>
 
 using namespace std;
 using namespace std::placeholders;
@@ -97,13 +98,40 @@ struct ezhttp : refcounted<ezhttp> {
     }
 };
 
+struct ezwebsock;
+void ws_send_handler(ezwebsock *, errcode const&, size_t);
+
 struct ezwebsock : refcounted<ezwebsock> {
     websocket::stream<tcp::socket> sock;
     flat_buffer buf;
+    struct pending_send {
+        lua_State *L;
+        char *data;
+        int len;
+        bool en_ack;
+    };
+    deque<pending_send> pending_sends;
 
     ezwebsock(tcp::socket sock) :
         sock(move(sock))
     {}
+
+    void send_pending_front() {
+        assert(pending_sends.size() > 0);
+        pending_send const& f = pending_sends.front();
+        auto handler = bind(ws_send_handler, this, _1, _2);
+        this->ref();
+        sock.async_write(boost::asio::buffer(f.data,f.len), handler);
+    }
+
+    void queue_send(lua_State *L, char *data, int len, bool en_ack) {
+        pending_sends.push_back({L, data, len, en_ack});
+        if (pending_sends.size() == 1) {
+            //If size is 1 it means send queue was previously empty,
+            //so we should kick off a write
+            send_pending_front();
+        }
+    }
 };
 
 void luaL_pusherrorcode(lua_State *L, errcode const& ec) {
@@ -305,10 +333,16 @@ void http_send_handler(
 }
 
 void ws_send_handler(
-    lua_State *L, ezwebsock *s,
-    char *data, bool en_ack,
+    ezwebsock *s,
     errcode const& ec, size_t bytes
 ) {
+    assert(s->pending_sends.size() > 0);
+    auto const& f = s->pending_sends.front();
+    lua_State *L = f.L;
+    
+    //TODO: do I need to check if this actually sent
+    //all the bytes? Who knows...
+    
     //cout << "In websock send handler" << endl;
     if (ec) {
         luaL_pusherrorcode(L, ec);
@@ -317,12 +351,9 @@ void ws_send_handler(
         return;
     }
     
-    //TODO: do I need to check if this actually sent
-    //all the bytes? Who knows
+    if (f.data != nullptr) delete[] f.data; //No longer needed
 
-    if (data != nullptr) delete[] data; //No longer needed
-
-    if (en_ack) {
+    if (f.en_ack) {
         lua_newtable(L);
         lua_pushstring(L, "type");
         lua_pushstring(L, "ack");
@@ -335,9 +366,11 @@ void ws_send_handler(
         luaL_pushptr(L, s, "ezwebsock");
     }
 
-    //Subtle: pushptr will call ref() if needed. We would
-    //still need to call put() to release the references
-    //held by this handler call
+    s->pending_sends.pop_front();
+    if (s->pending_sends.size() > 0) {
+        s->send_pending_front();
+    }
+    
     s->put();
 }
 
@@ -455,9 +488,17 @@ int ezserver_next_event(lua_State *L) {
 
     int last_top = lua_gettop(L);
     do {
+        //If on the last call to run_one we completed the
+        //last handler, then the context will stop itself.
+        //However, between then and now, the lua code may
+        //have queued up more work.
+        if (s->ctx.stopped()) s->ctx.restart();
         int rc = s->ctx.run_one();
-        //cout << "Unblocked" << endl;
-        if (rc == 0) s->ctx.restart(); //Is this correct????????
+        if (rc == 0) {
+            lua_pushnil(L);
+            lua_pushstring(L, "Ran out of work");
+            return 2;
+        }
     } while (lua_gettop(L) == last_top);
 
     //Let the compiler optimize if it wants
@@ -673,17 +714,9 @@ int ezwebsock_send(lua_State *L) {
         memcpy(data, str, len);
 
         //Handler will free the data once we are done
-        //with it
-        auto handler = bind(
-            ws_send_handler,
-            L, s->ref(), data, en_ack,
-            _1, _2
-        );
-
-        s->sock.async_write(
-            boost::asio::buffer(data, len),
-            handler
-        );
+        //with it. By the way, queue_send will take care
+        //of ref()ing s if necessary
+        s->queue_send(L, data, len, en_ack);
         
         break;
     }

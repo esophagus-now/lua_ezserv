@@ -8,8 +8,10 @@
 [x] Get 404 messages working
 [x] Get the chatroom working again
 [/] Get it all valgrind clean
+[x] Add optional timeout argument to ezserver
+[x] Allow multiple queued sends
 [ ] Figure out that boost beast websocket teardown stuff
-[ ] Try to package as a luarock?
+[x] Try to package as a luarock?
 
 
 Other improvement ideas:
